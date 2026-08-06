@@ -1,8 +1,10 @@
 package fuzs.diagonalwindows.client;
 
+import fuzs.diagonalblocks.api.v2.DiagonalBlockTypes;
 import fuzs.diagonalwindows.DiagonalWindows;
+import net.minecraft.client.renderer.block.BlockModelShaper;
 import net.minecraft.client.resources.model.BakedModel;
-import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.client.resources.model.ModelResourceLocation;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.state.BlockState;
@@ -13,7 +15,6 @@ import net.minecraftforge.eventbus.api.SubscribeEvent;
 import net.minecraftforge.fml.common.Mod;
 
 import java.lang.reflect.Constructor;
-import java.util.ArrayList;
 import java.util.Map;
 
 @Mod.EventBusSubscriber(modid = DiagonalWindows.MOD_ID, bus = Mod.EventBusSubscriber.Bus.MOD, value = Dist.CLIENT)
@@ -38,36 +39,35 @@ public final class DiagonalWindowsCtmBridge {
         int candidates = 0;
         int alreadyWrapped = 0;
         int newlyWrapped = 0;
+        int missing = 0;
 
         try {
-            for (Map.Entry<ResourceLocation, BakedModel> entry : new ArrayList<>(models.entrySet())) {
-                ResourceLocation modelId = entry.getKey();
-                if (!DiagonalWindows.MOD_ID.equals(modelId.getNamespace()) || !modelId.getPath().contains("/")) {
-                    continue;
-                }
+            // Dynamic model registry maps only support keyed access during this event.
+            for (Block block : DiagonalBlockTypes.WINDOW.getBlockConversions().values()) {
+                for (BlockState state : block.getStateDefinition().getPossibleStates()) {
+                    ModelResourceLocation modelId = BlockModelShaper.stateToModelLocation(state);
+                    BakedModel model = models.get(modelId);
+                    if (model == null) {
+                        missing++;
+                        continue;
+                    }
 
-                ResourceLocation blockId = new ResourceLocation(modelId.getNamespace(), modelId.getPath());
-                Block block = BuiltInRegistries.BLOCK.get(blockId);
-                if (!blockId.equals(BuiltInRegistries.BLOCK.getKey(block))) {
-                    continue;
-                }
+                    candidates++;
+                    if (ctmModelClass.isInstance(model)) {
+                        alreadyWrapped++;
+                        continue;
+                    }
 
-                candidates++;
-                BakedModel model = entry.getValue();
-                if (ctmModelClass.isInstance(model)) {
-                    alreadyWrapped++;
-                    continue;
+                    BakedModel wrapped = (BakedModel) constructor.newInstance(model, state);
+                    models.put(modelId, wrapped);
+                    newlyWrapped++;
                 }
-
-                BakedModel wrapped = (BakedModel) constructor.newInstance(model, block.defaultBlockState());
-                models.put(modelId, wrapped);
-                newlyWrapped++;
             }
         } catch (ReflectiveOperationException e) {
             throw new IllegalStateException("Unable to wrap Diagonal Windows baked models with Continuity", e);
         }
 
-        DiagonalWindows.LOGGER.info("Continuity model bridge processed {} models (already wrapped: {}, newly wrapped: {})",
-                candidates, alreadyWrapped, newlyWrapped);
+        DiagonalWindows.LOGGER.info("Continuity model bridge processed {} models (already wrapped: {}, newly wrapped: {}, missing: {})",
+                candidates, alreadyWrapped, newlyWrapped, missing);
     }
 }
